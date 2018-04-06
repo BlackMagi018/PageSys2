@@ -2,100 +2,205 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct PCB {
-    int PID;
-    char **text;
-    char **data;
-    int text_size;
-    int data_size;
-} PCB;
+#define ftsize 8
+#define pnum 5
 
-struct freeframe {
-    struct page * head;
-    struct page * tail;
+struct frame_table {
+    struct frame * ft[ftsize];
 };
 
-typedef struct page {
-    char data[50];
-    struct page * prev;
-    struct page * next;
-} page;
+struct freelist{
+    struct frame * top;
+    struct frame * tail;
+};
 
-char *print_results(struct page **table) {
+struct frame {
+    int frame_num;
+    int procID;
+    char Segment[25];
+    int pg_num;
+    struct frame * next;
+};
 
+struct page_table {
+    struct process *pt[pnum];
+};
+
+struct process {
+    int procID;
+    int tsize;
+    int tpages;
+    struct frame * trefs[ftsize];
+    int dsize;
+    int dpages;
+    struct frame *drefs[ftsize];
+};
+
+char * output_results(struct frame_table frame,struct page_table page) {
+    struct process * proc;
+    struct frame * fram;
+    printf("Page tables(s)\n");
+    for(int i = 0; i < pnum;i++){
+        proc = page.pt[i];
+        if(proc->procID >= 0){
+            printf("Process %d:\n",proc->procID);
+            printf("       Page      Frame\n");
+            for(int i = 0; i < proc->tpages;i++){
+                printf("Text    %d         %d\n",i,proc->trefs[i]->frame_num);
+            }
+            for(int i = 0; i < proc->dpages;i++){
+                printf("Data    %d         %d\n",i,proc->drefs[i]->frame_num);
+            }
+        }
+    }
+    fflush(stdout);
 }
 
 int main(int argc, char **argv) {
 
     FILE *tape = fopen(argv[1], "r");
 
-    //Free Fame Linked List
-    struct freeframe list;
     //Token pointer
     char *token;
+    char parts[3][50];
     //Argument Counter
     int count = 0;
 
-    //Creating List of PCB's
-    struct PCB ** block_list = (struct PCB **) malloc(10 * sizeof(struct PCB *));
-    for (int i = 0; i < 8; i++) {
-        block_list[i] = malloc(sizeof(struct PCB));
-    }
-
-    //Creating Page Table
-    struct page **table = (struct page **) malloc(8 * sizeof(struct page *));
-    for (int i = 0; i < 8; i++) {
-        struct page * frame = malloc(sizeof(struct page));
-        table[i] = frame;
-        sprintf(table[i]->data, "%d", i);
-        if (i > 0) {
-            table[i]->prev = table[i - 1];
-            table[i - 1]->next = table[i];
+    struct frame_table frame;
+    for(int i = 0; i < ftsize;i++){
+        struct frame * temp = malloc(sizeof(struct frame));
+        temp->frame_num = i;
+        temp->procID = -1;
+        temp->pg_num = -1;
+        if(i > 0 ){
+            struct frame * prev = frame.ft[i-1];
+            prev->next = temp;
         }
-    }
+        frame.ft[i] = temp;
 
-    //Create Command String array
-    char **parts = (char **) malloc(3 * sizeof(char *));
-    for (int i = 0; i < 8; i++) {
-        parts[i] = (char *) malloc(10 * sizeof(char));
     }
-
-    //align free fame list
-    list.head = table[0];
-    list.tail = table[7];
+    struct page_table page;
+    for(int i = 0; i < pnum; i++){
+        struct process * temp = malloc(sizeof(struct process));
+        temp->procID = -1;
+        page.pt[i] = temp;
+    }
+    struct freelist free;
+    free.top = frame.ft[0];
+    free.tail = frame.ft[ftsize-1];
 
     char input[100];
     printf("Click Enter to start the Simulation");
     while (getchar() && !feof(tape)) {
         fgets(input, sizeof(input), tape);
         token = strtok(input, " ");
-        parts[count] = token;
         while (token != NULL) {
+            strncpy(parts[count],token,50);
             count++;
             token = strtok(NULL, " ");
-            parts[count] = token;
         }
-        switch (count) {
+        switch(count){
             case 2:
-                printf("Process %s terminating\n", parts[0]);
+                printf("-- Process is terminating --\n");
+                int pid = (int) strtol(parts[0],NULL,10);
+                printf("Reclaiming Process %d Pages\n\n",pid);
+                struct process * del_entry = page.pt[pid];
+                del_entry->procID = -1;
+                for(int i = 0; i < del_entry->tpages;i++) {
+                    struct frame *deref = del_entry->trefs[i];
+                    deref->procID = -1;
+                    memset(deref->Segment, 0, 25);
+                    deref->pg_num = -1;
+                    if(free.top == NULL && free.tail == NULL){
+                        free.top = deref;
+                        free.tail = deref;
+                    }else if(free.top == NULL) {
+                        free.top = free.tail;
+                        struct frame *prev = free.tail;
+                        prev->next = deref;
+                        free.tail = deref;
+                    } else{
+                        struct frame *prev = free.tail;
+                        prev->next = deref;
+                        free.tail = deref;
+                    }
+                }
+                for(int i = 0; i < del_entry->dpages;i++){
+                    struct frame * deref = del_entry->drefs[i];
+                    deref->procID = -1;
+                    memset(deref->Segment,0,25);
+                    deref->pg_num = -1;
+                    if(free.top == NULL && free.tail == NULL){
+                        free.top = deref;
+                        free.tail = deref;
+                    }else if(free.top == NULL) {
+                        free.top = free.tail;
+                        struct frame *prev = free.tail;
+                        prev->next = deref;
+                        free.tail = deref;
+                    } else{
+                        struct frame *prev = free.tail;
+                        prev->next = deref;
+                        free.tail = deref;
+                    }
+                }
+                del_entry->tpages = 0;
+                del_entry->tsize = 0;
+                del_entry->dpages = 0;
+                del_entry->dsize = 0;
                 break;
             case 3:
                 printf("-- NEW PROCESS ARRIVING --\n");
-                printf("   Process ID: %s\n", parts[0]);
-                printf("   Text Size - %s\n", parts[1]);
-                printf("   Data Size - %s", parts[2]);
-                int ProcID = (int) strtol(parts[0],NULL,10);
-                int TextSize = (int) strtol(parts[1],NULL,10);
-                int DataSize = (int) strtol(parts[2],NULL,10);
-                block_list[ProcID]->PID = ProcID;
-                block_list[ProcID]->text_size = TextSize;
-                block_list[ProcID]->data_size = DataSize;
-                for(int i = 0; i <)
-                break;
-            default:
+                int id = (int) strtol(parts[0],NULL,10);
+                struct process * entry = page.pt[id];
+                entry->procID = id;
+                entry->tsize = (int) strtol(parts[1],NULL,10);
+                entry->dsize = (int) strtol(parts[2],NULL,10);
+                int temp = 0;
+                while(temp < entry->tsize){
+                    temp = temp + 512;
+                    entry->tpages++;
+                }
+                temp = 0;
+                while(temp < entry->dsize){
+                    temp = temp + 512;
+                    entry->dpages++;
+                }
+                for(int i = 0; i < entry->tpages;i++) {
+                    entry->trefs[i] = free.top;
+                    if(free.top == free.tail) {
+                        free.top = entry->trefs[i]->next;
+                        free.tail =entry->trefs[i]->next;
+                    } else {
+                        free.top = entry->trefs[i]->next;
+                    }
+                    struct frame *ref = entry->trefs[i];
+                    ref->procID = entry->procID;
+                    ref->pg_num = i;
+                    strcpy(ref->Segment, "Text");
+                }
+                for(int i = 0; i < entry->dpages;i++) {
+                    entry->drefs[i] = free.top;
+                    if(free.top == free.tail) {
+                        free.top = entry->drefs[i]->next;
+                        free.tail =entry->drefs[i]->next;
+                    } else {
+                        free.top = entry->drefs[i]->next;
+                    }
+                    struct frame *ref = entry->drefs[i];
+                    ref->procID = entry->procID;
+                    ref->pg_num = i;
+                    strcpy(ref->Segment, "Data");
+                }
+                printf("   Process ID:  %d\n", entry->procID);
+                printf("   Text Size    %d\n", entry->tsize);
+                printf("   Text Pages   %d\n", entry->tpages);
+                printf("   Data Size    %d\n", entry->dsize);
+                printf("   Data Pages   %d\n\n", entry->dpages);
                 break;
         }
         count = 0;
+        output_results(frame,page);
     }
     printf("Simulation Complete");
 }
